@@ -88,3 +88,301 @@ func TODO() Context {
 + Context 只用来**临时**做函数之间的上下文透传，不能持久化 Context 或者把 Context 长久保存。把 Context 持久化到数据库、本地文件或者全局变量、缓存中都是错误的用法。
 + key 的类型不应该是字符串类型或者其它内建类型，否则容易在包之间使用 Context 时候产生冲突。**使用 WithValue 时，key 的类型应该是自己定义的类型。**
 + 常常使用 struct{}作为底层类型定义 key 的类型。对于 exported key 的静态类型，常常是接口或者指针。这样可以尽量减少内存分配。
+
+
+
+# 创建特殊用途的 Context 的方法
+
+## WithValue
+
+WithValue 基于 parent Context 生成一个新的 Context，保存了一个 key-value 键值对。它常常用来传递上下文。
+
+WithValue 方法其实是创建了一个类型为 valueCtx 的 Context，它的类型定义如下：
+
+```go
+// A valueCtx carries a key-value pair. It implements Value for that key and
+// delegates all other calls to the embedded Context.
+type valueCtx struct {
+	Context
+	key, val any
+}
+```
+
+它持有一个 key-value 键值对，还持有 parent 的 Context。**它覆盖了 Value 方法，优先从自己的存储中检查这个 key，不存在的话会从 parent 中继续检查**。
+
+Go 标准库实现的 Context 还实现了链式查找。如果不存在，还会向 parent Context 去查找，如果 parent 还是 valueCtx 的话，还是遵循相同的原则：valueCtx 会嵌入 parent，所以还是会查找 parent 的 Value 方法的。
+
+```go
+
+ctx = context.TODO()
+ctx = context.WithValue(ctx, "key1", "0001")
+ctx = context.WithValue(ctx, "key2", "0002")
+ctx = context.WithValue(ctx, "key3", "0003")
+ctx = context.WithValue(ctx, "key4", "0004")
+
+fmt.Println(ctx.Value("key1"))
+```
+
+![chain-key](chain-key.jpg)
+
+## WithCancel
+
+```go
+// A canceler is a context type that can be canceled directly. The
+// implementations are *cancelCtx and *timerCtx.
+type canceler interface {
+	cancel(removeFromParent bool, err, cause error)
+	Done() <-chan struct{}
+}
+```
+
+实现了 canceler 接口的 context 可以直接 cancel，在标准库里面实现的 context 是 *cancelCtx 和 *timerCtx 。
+
+context.WithCancel 函数能够从 context.Context 中衍生出一个**新的子上下文**并返回用于**取消该上下文的函数**。一旦我们执行返回的取消函数，**当前上下文以及它的子上下文都会被取消**，所有的 Goroutine 都会同步收到这一取消信号。
+
+WithCancel 方法返回 parent 的副本，只是副本中的 Done Channel 是新建的对象，它的类型是 cancelCtx。
+
+我们常常在一些需要主动取消长时间的任务时，创建这种类型的 Context，然后把这个 Context 传给长时间执行任务的 goroutine。当需要中止任务时，我们就可以 cancel 这个 Context，这样长时间执行任务的 goroutine，就可以通过检查这个 Context，知道 Context 已经被取消了。
+
+WithCancel 返回值中的第二个值是一个 cancel 函数。其实，这个返回值的名称（cancel）和类型（Cancel）也非常迷惑人。
+
+记住，不是只有你想中途放弃，才去调用 cancel，只要你的任务正常完成了，就需要调用 cancel，这样，这个 Context 才能释放它的资源（通知它的 children 处理 cancel，从它的 parent 中把自己移除，甚至释放相关的 goroutine）。
+
+```go
+
+func WithCancel(parent Context) (ctx Context, cancel CancelFunc) {
+    c := newCancelCtx(parent)
+    propagateCancel(parent, &c)// 把c朝上传播
+    return &c, func() { c.cancel(true, Canceled) }
+}
+
+// newCancelCtx returns an initialized cancelCtx.
+func newCancelCtx(parent Context) cancelCtx {
+    return cancelCtx{Context: parent}
+}
+```
+
+代码中调用的 propagateCancel 方法会顺着 parent 路径往上找，直到找到一个 cancelCtx，或者为 nil。如果不为空，就把自己加入到这个 cancelCtx 的 child，以便这个 cancelCtx 被取消的时候通知自己。如果为空，会新起一个 goroutine，由它来监听 parent 的 Done 是否已关闭。
+
+当这个 cancelCtx 的 cancel 函数被调用的时候，或者 parent 的 Done 被 close 的时候，这个 cancelCtx 的 Done 才会被 close。
+
+cancel 是向下传递的，如果一个 WithCancel 生成的 Context 被 cancel 时，如果它的子 Context（也有可能是孙，或者更低，依赖子的类型）也是 cancelCtx 类型的，就会被 cancel，但是不会向上传递。parent Context 不会因为子 Context 被 cancel 而 cancel。
+
+我们直接从 context.WithCancel 函数的实现来看它到底做了什么：
+
+```go
+func WithCancel(parent Context) (ctx Context, cancel CancelFunc) {
+	c := withCancel(parent)
+	return c, func() { c.cancel(true, Canceled, nil) }
+}
+
+func withCancel(parent Context) *cancelCtx {
+	if parent == nil {
+		panic("cannot create context from nil parent")
+	}
+    // 构建一个 *cancelCtx
+	c := newCancelCtx(parent)
+    // 设置父节点被取消时，子节点也被取消
+	propagateCancel(parent, c)
+	return c
+}
+
+func newCancelCtx(parent Context) *cancelCtx {
+	return &cancelCtx{Context: parent}
+}
+
+func propagateCancel(parent Context, child canceler) {
+	done := parent.Done()
+	if done == nil {
+		return // parent is never canceled
+	}
+
+	select {
+	case <-done:
+		// parent is already canceled
+		child.cancel(false, parent.Err(), Cause(parent))
+		return
+	default:
+	}
+
+	if p, ok := parentCancelCtx(parent); ok {
+		p.mu.Lock()
+		if p.err != nil {
+			// parent has already been canceled
+			child.cancel(false, p.err, p.cause)
+		} else {
+			if p.children == nil {
+				p.children = make(map[canceler]struct{})
+			}
+			p.children[child] = struct{}{}
+		}
+		p.mu.Unlock()
+	} else {
+		goroutines.Add(1)
+		go func() {
+			select {
+			case <-parent.Done():
+				child.cancel(false, parent.Err(), Cause(parent))
+			case <-child.Done():
+			}
+		}()
+	}
+}
+
+
+type cancelCtx struct {
+	Context
+
+	mu       sync.Mutex            // protects following fields
+	done     atomic.Value          // of chan struct{}, created lazily, closed by first cancel call
+	children map[canceler]struct{} // set to nil by the first cancel call
+	err      error                 // set to non-nil by the first cancel call
+	cause    error                 // set to non-nil by the first cancel call
+}
+
+
+func (c *cancelCtx) cancel(removeFromParent bool, err, cause error) {
+	if err == nil {
+		panic("context: internal error: missing cancel error")
+	}
+	if cause == nil {
+		cause = err
+	}
+	c.mu.Lock()
+	if c.err != nil {
+		c.mu.Unlock()
+		return // already canceled
+	}
+	c.err = err
+	c.cause = cause
+	d, _ := c.done.Load().(chan struct{})
+	if d == nil {
+		c.done.Store(closedchan)
+	} else {
+		close(d)
+	}
+	for child := range c.children {
+		// NOTE: acquiring the child's lock while holding parent's lock.
+		child.cancel(false, err, cause)
+	}
+	c.children = nil
+	c.mu.Unlock()
+
+	if removeFromParent {
+		removeChild(c.Context, c)
+	}
+}
+```
+
+前文说过会返回一个新的子上下文，这个上下文是 cancelCtx 。
+
+## WithDeadline
+
+WithDeadline 会返回一个 parent 的副本，并且设置了一个不晚于参数 d 的截止时间，类型为 timerCtx（或者是 cancelCtx）。
+
+如果它的截止时间晚于 parent 的截止时间，那么就以 parent 的截止时间为准，并返回一个类型为 cancelCtx 的 Context，因为 parent 的截止时间到了，就会取消这个 cancelCtx。
+
+如果当前时间已经超过了截止时间，就直接返回一个已经被 cancel 的 timerCtx。否则就会启动一个定时器，到截止时间取消这个 timerCtx。
+
+综合起来，timerCtx 的 Done 被 Close 掉，主要是由下面的某个事件触发的：
+
++ 截止时间到了；
++ cancel 函数被调用；
++ parent 的 Done 被 close。
+
+```go
+
+func WithDeadline(parent Context, d time.Time) (Context, CancelFunc) {
+    // 如果parent的截止时间更早，直接返回一个cancelCtx即可
+    if cur, ok := parent.Deadline(); ok && cur.Before(d) {
+        return WithCancel(parent)
+    }
+    c := &timerCtx{
+        cancelCtx: newCancelCtx(parent),
+        deadline:  d,
+    }
+    propagateCancel(parent, c) // 同cancelCtx的处理逻辑
+    dur := time.Until(d)
+    if dur <= 0 { //当前时间已经超过了截止时间，直接cancel
+        c.cancel(true, DeadlineExceeded)
+        return c, func() { c.cancel(false, Canceled) }
+    }
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    if c.err == nil {
+        // 设置一个定时器，到截止时间后取消
+        c.timer = time.AfterFunc(dur, func() {
+            c.cancel(true, DeadlineExceeded)
+        })
+    }
+    return c, func() { c.cancel(true, Canceled) }
+}
+```
+
+和 cancelCtx 一样，WithDeadline（WithTimeout）返回的 cancel 一定要调用，并且要尽可能早地被调用，这样才能尽早释放资源，不要单纯地依赖截止时间被动取消。
+
+```go
+
+func slowOperationWithTimeout(ctx context.Context) (Result, error) {
+  ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+  defer cancel() // 一旦慢操作完成就立马调用cancel
+  return slowOperation(ctx)
+}
+```
+
+
+
+## WithTimeout
+
+WithTimeout 其实是和 WithDeadline 一样，只不过一个参数是超时时间，一个参数是截止时间。超时时间加上当前时间，其实就是截止时间。
+
+```go
+
+func WithTimeout(parent Context, timeout time.Duration) (Context, CancelFunc) {
+    // 当前时间+timeout就是deadline
+    return WithDeadline(parent, time.Now().Add(timeout))
+}
+```
+
+
+
+# 总结
+
+我们经常使用 Context 来取消一个 goroutine 的运行，这是 Context 最常用的场景之一，Context 也被称为 goroutine 生命周期范围（goroutine-scoped）的 Context，把 Context 传递给 goroutine。但是，goroutine 需要尝试检查 Context 的 Done 是否关闭了：
+
+```go
+
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+
+    go func() {
+        defer func() {
+            fmt.Println("goroutine exit")
+        }()
+
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            default:
+                time.Sleep(time.Second)
+            }
+        }
+    }()
+
+    time.Sleep(time.Second)
+    cancel()
+    time.Sleep(2 * time.Second)
+}
+```
+
+如果你要为 Context 实现一个带超时功能的调用，比如访问远程的一个微服务，超时并不意味着你会通知远程微服务已经取消了这次调用，大概率的实现只是避免客户端的长时间等待，远程的服务器依然还执行着你的请求。
+
+所以，有时候，Context 并不会减少对服务器的请求负担。如果在 Context 被 cancel 的时候，你能关闭和服务器的连接，中断和数据库服务器的通讯、停止对本地文件的读写，那么，这样的超时处理，同时能减少对服务调用的压力，但是这依赖于你对超时的底层处理机制。
+
+在真正使用传值的功能时我们也应该非常谨慎，使用 context.Context 传递请求的所有参数一种非常差的设计，比较常见的使用场景是传递请求对应用户的认证令牌以及用于进行分布式追踪的请求 ID。
+
+![context-summary](context-summary.jpg)
+
+
+
