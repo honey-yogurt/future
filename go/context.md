@@ -8,21 +8,21 @@ Go 1.7 标准库引入 context，中文译作“上下文”，准确说它是 g
 
 context 主要用来在 goroutine 之间传递上下文信息，包括：取消信号、超时时间、截止时间、k-v 等。
 
-<span style="color:red;font-weight:bold;">context 用来解决 goroutine 之间退出通知、元数据传递的功能。</span>
+**context 用来解决 goroutine 之间退出通知、元数据传递的功能。**
 
-Context类型可以提供一类代表上下文的值。此类值是<span style="color:red;font-weight:bold;">并发安全</span>的，也就是说它可以被传播给多个 goroutine。
+Context类型可以提供一类代表上下文的值。此类值是**并发安全**的，也就是说它可以被传播给多个 goroutine。
 
-由于Context类型实际上是一个接口类型，而context包中实现该接口的所有私有类型，都是基于某个数据类型的 <span style="color:red;font-weight:bold;">指针类型</span> 指针，所以，如此传播并不会影响该类型值的功能和安全。
+由于Context类型实际上是一个接口类型，而context包中实现该接口的所有私有类型，都是基于某个数据类型的**指针类型**指针，所以，如此传播并不会影响该类型值的功能和安全。
 
 Context类型的值（以下简称Context值）是可以繁衍的，这意味着我们可以通过一个Context值产生出任意个子值。这些子值可以携带其父值的属性和数据，也可以响应我们通过其父值传达的信号。
 
-正因为如此，所有的Context值共同构成了一颗<span style="color:red;font-weight:bold;">代表了上下文全貌的树形结构</span>。这棵树的树根（或者称上下文根节点）是一个已经在context包中预定义好的Context值，它是全局唯一的。通过调用 context.Background 函数，我们就可以获取到它。
+正因为如此，所有的Context值共同构成了一颗**代表了上下文全貌的树形结构**。这棵树的树根（或者称上下文根节点）是一个已经在context包中预定义好的Context值，它是全局唯一的。通过调用 context.Background 函数，我们就可以获取到它。
 
 这里注意一下，这个上下文根节点仅仅是一个最基本的支点，它不提供任何额外的功能。也就是说，它既不可以被撤销（cancel），也不能携带任何数据。
 
 ![context-tree](context-tree.png)
 
-每一个 context.Context 都会从最顶层的 Goroutine 一层一层传递到最下层。context.Context 可以在上层 Goroutine 执行出现错误时，将信号<span style="color:red;font-weight:bold;">及时同步</span>给下层。
+每一个 context.Context 都会从最顶层的 Goroutine 一层一层传递到最下层。context.Context 可以在上层 Goroutine 执行出现错误时，将信号**及时同步**给下层。
 
 context 包中的 Context 不仅仅传递上下文信息，还有 timeout 等其它功能，是不是过于冗杂了呢？
 
