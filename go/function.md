@@ -14,7 +14,7 @@
 
 严格来说，函数的名称也不能算作函数签名的一部分，它只是我们在调用函数时，需要给定的标识符而已。
 
-关于函数值和方法值的案例移步[function & method](../experiment/method_feature/README.md)
+关于函数值和方法值的案例移步[function & method](../experiment/method_feature/)
 
 **函数类型属于引用类型，它的值可以为nil，而这种类型的零值恰恰就是nil。**
 
