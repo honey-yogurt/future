@@ -152,6 +152,22 @@ pId type is func pId value is 0x144d80
 hsId type is func hsId value is 0x144d40
 hpId type is func hpId value is 0x144d80
 ```
+
+同理，显然普通的函数自然也可以做到
+```go
+func Add() string {
+	return "s"
+}
+
+func main() {
+	sId := Add
+	fmt.Println("sId type is", reflect.TypeOf(sId).Kind(), "sId value is", sId)
+	handMap := newMessageHandlerDistributor()
+	handMap.registerHandler("syncHarder", "GetId", sId)
+	hsId := handMap.handler("syncHarder", "GetId")
+	fmt.Println("hsId type is", reflect.TypeOf(hsId).Kind(), "hsId value is", hsId)
+}
+```
 可以看出，我们注册的是一个 function 类型，具体值表现是 **这个function的引用（地址）** 。
 即，对于某个结构体的实例来说，不仅仅有这个结构体的字段值，我们同样可以通过 实例.方法名（注意不带括号，不是调用） 得到这个结构体实例的 function 值。
 **这个 function 值持有 调用者的指针，故可以拿到调用者的信息。**

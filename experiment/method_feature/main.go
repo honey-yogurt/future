@@ -74,21 +74,34 @@ import (
 //	fmt.Println(h1())
 //}
 
-func main() {
-	syncHarder := NewSyncHarder()
-	point := NewSyncHarderPoint()
-	fmt.Println("syncHarder type is", reflect.TypeOf(syncHarder).Kind())
-	fmt.Println("point type is", reflect.TypeOf(point).Kind())
-	sId := syncHarder.GetId
-	fmt.Println("sId type is", reflect.TypeOf(sId).Kind(), "sId value is", sId)
-	pId := point.GetId
-	fmt.Println("pId type is", reflect.TypeOf(pId).Kind(), "pId value is", pId)
-	handMap := newMessageHandlerDistributor()
-	handMap.registerHandler("syncHarder", "GetId", syncHarder.GetId)
-	handMap.registerHandler("point", "GetId", point.GetId)
-	hsId := handMap.handler("syncHarder", "GetId")
-	hpId := handMap.handler("point", "GetId")
-	fmt.Println("hsId type is", reflect.TypeOf(hsId).Kind(), "hsId value is", hsId)
-	fmt.Println("hpId type is", reflect.TypeOf(hpId).Kind(), "hpId value is", hpId)
+//func main() {
+//	syncHarder := NewSyncHarder()
+//	point := NewSyncHarderPoint()
+//	fmt.Println("syncHarder type is", reflect.TypeOf(syncHarder).Kind())
+//	fmt.Println("point type is", reflect.TypeOf(point).Kind())
+//	sId := syncHarder.GetId
+//	fmt.Println("sId type is", reflect.TypeOf(sId).Kind(), "sId value is", sId)
+//	pId := point.GetId
+//	fmt.Println("pId type is", reflect.TypeOf(pId).Kind(), "pId value is", pId)
+//	handMap := newMessageHandlerDistributor()
+//	handMap.registerHandler("syncHarder", "GetId", syncHarder.GetId)
+//	handMap.registerHandler("point", "GetId", point.GetId)
+//	hsId := handMap.handler("syncHarder", "GetId")
+//	hpId := handMap.handler("point", "GetId")
+//	fmt.Println("hsId type is", reflect.TypeOf(hsId).Kind(), "hsId value is", hsId)
+//	fmt.Println("hpId type is", reflect.TypeOf(hpId).Kind(), "hpId value is", hpId)
+//
+//}
 
+func Add() string {
+	return "s"
+}
+
+func main() {
+	sId := Add
+	fmt.Println("sId type is", reflect.TypeOf(sId).Kind(), "sId value is", sId)
+	handMap := newMessageHandlerDistributor()
+	handMap.registerHandler("syncHarder", "GetId", sId)
+	hsId := handMap.handler("syncHarder", "GetId")
+	fmt.Println("hsId type is", reflect.TypeOf(hsId).Kind(), "hsId value is", hsId)
 }
