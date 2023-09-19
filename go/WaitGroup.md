@@ -60,7 +60,7 @@ func main() {
 + noCopy 的辅助字段，主要就是辅助 vet 工具检查是否通过 copy 赋值这个 WaitGroup 实例
 + state1，一个具有复合意义的字段，包含 WaitGroup 的计数、阻塞在检查点的 waiter 数和信号量。
 
-```json
+```go
 type WaitGroup struct {
     // 避免复制使用的一个技巧，可以告诉vet工具违反了复制使用的规则
     noCopy noCopy
